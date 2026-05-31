@@ -1,0 +1,43 @@
+# Build artifacts
+build/
+*.o
+*.a
+
+# Simulation output
+waves/
+*.vcd
+*.fst
+*.lxt
+
+# iverilog compiled output (legacy/loose)
+a.out
+
+# GTKWave save files (optional — keep these if you want to share wave layouts)
+*.gtkw
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Vivado project files (if you end up using Vivado in-tree)
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.runs/
+*.gen/
+*.jou
+*.log
+*.str
+*.xpr
+.Xil/
+vivado_*.backup.jou
+vivado_*.backup.log
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~

@@ -16,8 +16,7 @@
 // delayed by j cycles. Implemented with a uniform bank of shift-register delay
 // stages, tapped at depth i (resp. j). See the feed logic below.
 //
-// CURRENT STATUS: FSM, loading, and FEED skew logic implemented. DRAIN is still
-// a stub — see the marked section.
+// STATUS: complete.
 // =============================================================================
 
 module mat_mul #(

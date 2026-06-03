@@ -64,6 +64,11 @@ module fp16_mul_tb;
     // human-readable computation as a sanity check.
     // -------------------------------------------------------------------------
     initial begin
+        $dumpfile("waves/fp16_mul_tb.vcd");
+        $dumpvars(0, fp16_mul_tb);
+    end
+
+    initial begin
         errors = 0;
         $display("=== fp16_mul testbench start ===");
 

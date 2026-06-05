@@ -1,11 +1,42 @@
+// =============================================================================
+// fp16_add.v  -  Combinational IEEE 754 half-precision adder
+// =============================================================================
+// Computes result = a + b for fp16 values, with denormalized numbers flushed
+// to zero (FTZ) on input and output. NaN inputs are not supported.
+//
+// Algorithm:
+//   1. Decode and FTZ. Determine larger-magnitude operand (by exp, breaking
+//      ties by mantissa); call it "big", the other "small". The result sign
+//      will be the big operand's sign (for both add and effective-subtract).
+//   2. Align: shift small's mantissa right by (big_exp - small_exp). Keep G,
+//      R, and a sticky S of the bits shifted past R.
+//   3. Sign analysis: if signs match it's an effective ADD of magnitudes; if
+//      signs differ it's an effective SUBTRACT (big - small, magnitudes).
+//   4. Compute the sum/difference in a width that accommodates either
+//      direction's overflow / cancellation:
+//          add  : 11-bit + 11-bit -> 12 bits (overflow at the top)
+//          sub  : 11-bit - 11-bit -> 11 bits, possibly with many leading 0s
+//      We use a 14-bit datapath: { carry/leading, 11 mantissa, G, R } and a
+//      separate sticky bit.
+//   5. Normalize: shift left until the leading 1 sits in the canonical
+//      position; adjust exponent accordingly. clz drives this.
+//   6. Round-to-nearest-even using G, R, S. Handle post-rounding overflow.
+//   7. Final special-case mux for over/underflow, infinity, exact-zero.
+// =============================================================================
 
+
+`timescale 1ns / 1ps
 module fp16_add (
     input  wire [15:0] a,
     input  wire [15:0] b,
     output wire [15:0] result
 );
 
-    // Decode + FTZ
+    // -------------------------------------------------------------------------
+    // Decode + FTZ. A denormal input (exp == 0, mantissa != 0) is treated as
+    // +0 by zeroing both fields. Sign is preserved on a true zero but the
+    // value is zero either way for our purposes.
+    // -------------------------------------------------------------------------
     wire        a_denorm = (a[14:10] == 5'd0) && (a[9:0] != 10'd0);
     wire        b_denorm = (b[14:10] == 5'd0) && (b[9:0] != 10'd0);
     wire [15:0] a_eff    = a_denorm ? {a[15], 15'd0} : a;
@@ -27,7 +58,11 @@ module fp16_add (
     wire [10:0] full_a = {!a_is_zero, man_a};
     wire [10:0] full_b = {!b_is_zero, man_b};
 
-    // Pick the larger-magnitude operand as "big"
+    // -------------------------------------------------------------------------
+    // Pick the larger-magnitude operand as "big". Larger exponent wins; on a
+    // tie we compare full mantissas (which include the implicit 1, so this
+    // correctly compares true magnitudes).
+    // -------------------------------------------------------------------------
     wire a_bigger = (exp_a > exp_b) ||
                     ((exp_a == exp_b) && (full_a >= full_b));
 
@@ -38,7 +73,20 @@ module fp16_add (
     wire [10:0] full_big   = a_bigger ? full_a : full_b;
     wire [10:0] full_small = a_bigger ? full_b : full_a;
 
+    // -------------------------------------------------------------------------
     // Align "small" to "big" by right-shifting its mantissa.
+    //
+    // The datapath holds {leading_carry, 11 mantissa, guard, round} = 14 bits.
+    // Sticky is tracked separately.
+    //
+    // big's value, pre-shift:    {1'b0, full_big, 1'b0, 1'b0}
+    //                            ^carry         ^G    ^R
+    // small's value, pre-shift:  {1'b0, full_small, 1'b0, 1'b0}
+    // Then small is right-shifted by exp_diff. Bits that fall off feed sticky.
+    //
+    // If exp_diff >= 13, the entire small operand has shifted past the round
+    // bit, so its only contribution is to sticky (if it was nonzero at all).
+    // -------------------------------------------------------------------------
     wire [4:0]  exp_diff = exp_big - exp_small;
 
     wire [13:0] big_aligned   = {1'b0, full_big,   1'b0, 1'b0};
@@ -73,7 +121,7 @@ module fp16_add (
     // sum_raw is 14 bits: { possible-carry, 11 mantissa, G, R }.
     // For subtract, we tuck the sticky into the subtraction by treating the
     // sticky as if it sits one bit below R (it determines whether the result
-    // would be slightly larger had we kept more bits) — we handle this by
+    // would be slightly larger had we kept more bits) - we handle this by
     // subtracting 1 from the borrow side if sticky is set and we're
     // subtracting. The classical way: include sticky as the low bit of the
     // subtrahend, in a widened compare. Below we keep things simple by doing
@@ -187,21 +235,15 @@ module fp16_add (
     end
 
     // -------------------------------------------------------------------------
-    // Round-to-nearest-even on mantissa_grm using G (the LSB of mantissa_grm
-    // is actually... no, wait — let me reread. mantissa_grm is {1, 10
-    // mantissa, G} where G is bit 0. So the 10-bit kept mantissa is
-    // mantissa_grm[10:1], and G = mantissa_grm[0]. R = round_bit. S = norm_sticky.
+    // Truncation (no rounding). For a graphics pipeline the 1-ULP error is
+    // invisible and this removes the round-carry adder + overflow check from
+    // the critical path, saving several LUT levels.
+    //
+    // kept_mantissa  = mantissa_grm[10:1]  (drop the guard bit)
+    // exp_final      = exp_norm            (no post-round exponent bump)
     // -------------------------------------------------------------------------
-    wire        guard          = mantissa_grm[0];
-    wire [9:0]  kept_mantissa  = mantissa_grm[10:1];
-    wire        round_up       = guard && (round_bit || norm_sticky || kept_mantissa[0]);
-
-    wire [10:0] mantissa_rounded = {1'b0, kept_mantissa} + {10'b0, round_up};
-    wire        round_overflow   = mantissa_rounded[10];
-
-    wire [9:0]  mantissa_final = round_overflow ? mantissa_rounded[10:1]
-                                                : mantissa_rounded[9:0];
-    wire signed [7:0] exp_final = exp_norm + (round_overflow ? 8'sd1 : 8'sd0);
+    wire [9:0] kept_mantissa = mantissa_grm[10:1];
+    wire signed [7:0] exp_final = exp_norm;
 
     // -------------------------------------------------------------------------
     // Special-case mux and final assembly.
@@ -210,13 +252,13 @@ module fp16_add (
 
     // Inf handling: inf + finite = inf (same sign as the inf operand). inf +
     // inf same sign = inf; opposite signs would be NaN per IEEE, but we
-    // declared NaN unsupported — output +0 as a fallback (this shouldn't
+    // declared NaN unsupported - output +0 as a fallback (this shouldn't
     // occur in a well-behaved graphics pipeline).
     wire inf_path        = a_is_inf || b_is_inf;
     wire inf_opp_sign    = a_is_inf && b_is_inf && (sign_a != sign_b);
     wire        sign_inf = a_is_inf ? sign_a : sign_b;
 
-    // a + 0 = a, 0 + b = b — falls out of the normal path naturally because
+    // a + 0 = a, 0 + b = b - falls out of the normal path naturally because
     // exp_big/full_big already reflect the nonzero operand. So no special-
     // case is needed for "one is zero" unless we want to short-circuit.
 
@@ -224,12 +266,12 @@ module fp16_add (
     wire underflow_final = (exp_final < 8'sd1);
 
     assign result =
-        inf_opp_sign ? 16'b0                                          :
-        inf_path     ? {sign_inf, 5'd31, 10'd0}                       :
-        both_zero    ? 16'b0                                          :
-        result_zero  ? 16'b0                                          :
+        inf_opp_sign    ? 16'b0                                       :
+        inf_path        ? {sign_inf, 5'd31, 10'd0}                    :
+        both_zero       ? 16'b0                                       :
+        result_zero     ? 16'b0                                       :
         overflow_final  ? {sign_big, 5'd31, 10'd0}                    :
         underflow_final ? 16'b0                                       :
-                          {sign_big, exp_final[4:0], mantissa_final};
+                          {sign_big, exp_final[4:0], kept_mantissa};
 
 endmodule

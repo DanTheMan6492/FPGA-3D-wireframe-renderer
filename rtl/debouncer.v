@@ -21,6 +21,7 @@
 // COUNT_MAX to a small value so the debounce window is only a few clocks.
 // =============================================================================
 
+`timescale 1ns / 1ps
 module debouncer #(
     // Number of consecutive stable clocks required before the output follows
     // the input. ~10 ms at 100 MHz by default.

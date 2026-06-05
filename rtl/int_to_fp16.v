@@ -16,6 +16,7 @@
 // =============================================================================
 
 
+`timescale 1ns / 1ps
 module int_to_fp16 (
     input  wire signed [7:0]  int_in,
     output wire        [15:0] fp16_out

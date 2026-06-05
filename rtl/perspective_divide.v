@@ -1,5 +1,5 @@
 // =============================================================================
-// perspective_divide.v  —  Per-vertex perspective divide + viewport transform
+// perspective_divide.v  -  Per-vertex perspective divide + viewport transform
 // =============================================================================
 // For each of `vertex_count` vertices in transform_mem:
 //   1. Read 4 fp16 components (x, y, z, w) from addresses 4N..4N+3.
@@ -21,6 +21,7 @@
 // data valid on cycle K+1. The FSM handles this explicitly.
 // =============================================================================
 
+`timescale 1ns / 1ps
 module perspective_divide (
     input  wire        clk,
     input  wire        rst,
@@ -69,44 +70,55 @@ module perspective_divide (
     fp16_mul u_mul_yn (.a(vy), .b(w_recip_q), .result(y_ndc_w));
 
     // px = (x_ndc + 1.0) * 320.0
-    wire [15:0] x_shifted, px_w;
-    fp16_add u_add_x  (.a(x_ndc_q),  .b(FP16_ONE),  .result(x_shifted));
-    fp16_mul u_mul_px (.a(x_shifted), .b(FP16_320), .result(px_w));
+    // py = (1.0 - y_ndc) * 240.0 = (1.0 + (-y_ndc)) * 240.0
+    //
+    // These are split across two states (COMP_SHIFT and COMP_PIX) so each
+    // state contains only a single fp16 operation, keeping the combinational
+    // depth under the 100 MHz budget.
+    //
+    // COMP_SHIFT: register the add results (x_shifted, y_shifted)
+    // COMP_PIX:   register the multiply results (px_q, py_q)
+    wire [15:0] x_shifted_w, y_shifted_w;
+    fp16_add u_add_x (.a(x_ndc_q),  .b(FP16_ONE),  .result(x_shifted_w));
 
-    // py = (1.0 - y_ndc) * 240.0   — implemented as (1.0 + (-y_ndc)) * 240
     wire [15:0] y_ndc_neg = {~y_ndc_q[15], y_ndc_q[14:0]};
-    wire [15:0] y_shifted, py_w;
-    fp16_add u_add_y  (.a(FP16_ONE), .b(y_ndc_neg), .result(y_shifted));
-    fp16_mul u_mul_py (.a(y_shifted), .b(FP16_240), .result(py_w));
+    fp16_add u_add_y (.a(FP16_ONE), .b(y_ndc_neg), .result(y_shifted_w));
+
+    reg [15:0] x_shifted_q, y_shifted_q;   // registered after COMP_SHIFT
+
+    wire [15:0] px_w, py_w;
+    fp16_mul u_mul_px (.a(x_shifted_q), .b(FP16_320), .result(px_w));
+    fp16_mul u_mul_py (.a(y_shifted_q), .b(FP16_240), .result(py_w));
 
     // -------------------------------------------------------------------------
     // FSM
     //
-    //   IDLE       — wait for start.
-    //   READ_X     — present addr 4N+0. read_data will reflect this 2 cycles later.
-    //   READ_Y     — present addr 4N+1. (read_data is still the previous value.)
-    //   READ_Z     — present addr 4N+2. read_data now = tm[4N+0]: latch as vx.
-    //   READ_W     — present addr 4N+3. read_data = tm[4N+1]: latch as vy.
-    //   WAIT_Z     — read_data = tm[4N+2]: latch as vz.
-    //   WAIT_W     — read_data = tm[4N+3]: latch as vw.
+    //   IDLE       - wait for start.
+    //   READ_X     - present addr 4N+0. read_data will reflect this 2 cycles later.
+    //   READ_Y     - present addr 4N+1. (read_data is still the previous value.)
+    //   READ_Z     - present addr 4N+2. read_data now = tm[4N+0]: latch as vx.
+    //   READ_W     - present addr 4N+3. read_data = tm[4N+1]: latch as vy.
+    //   WAIT_Z     - read_data = tm[4N+2]: latch as vz.
+    //   WAIT_W     - read_data = tm[4N+3]: latch as vw.
     //
     // i.e. each latch is TWO states after the matching address was presented.
     // This matches the testbench/SDPRAM model where read_addr drives a
     // registered output, giving an effective two-cycle read-to-use latency
     // when both the address and the consumer are registered.
-    localparam IDLE     = 4'd0;
-    localparam READ_X   = 4'd1;
-    localparam READ_Y   = 4'd2;
-    localparam READ_Z   = 4'd3;
-    localparam READ_W   = 4'd4;
-    localparam WAIT_Z   = 4'd5;
-    localparam WAIT_W   = 4'd6;
-    localparam COMP_REC = 4'd7;
-    localparam COMP_NDC = 4'd8;
-    localparam COMP_PIX = 4'd9;
-    localparam WRITE_PX = 4'd10;
-    localparam WRITE_PY = 4'd11;
-    localparam DONE_S   = 4'd12;
+    localparam IDLE       = 4'd0;
+    localparam READ_X     = 4'd1;
+    localparam READ_Y     = 4'd2;
+    localparam READ_Z     = 4'd3;
+    localparam READ_W     = 4'd4;
+    localparam WAIT_Z     = 4'd5;
+    localparam WAIT_W     = 4'd6;
+    localparam COMP_REC   = 4'd7;
+    localparam COMP_NDC   = 4'd8;
+    localparam COMP_SHIFT = 4'd9;   // new: register fp16_add results
+    localparam COMP_PIX   = 4'd10;  // was 9: register fp16_mul results
+    localparam WRITE_PX   = 4'd11;  // was 10
+    localparam WRITE_PY   = 4'd12;  // was 11
+    localparam DONE_S     = 4'd13;  // was 12
     reg [3:0] state;
 
     reg [7:0] v_idx;  // current vertex index, 0..vertex_count-1
@@ -116,10 +128,12 @@ module perspective_divide (
     // =========================================================================
     always @(posedge clk) begin
         if (rst) begin
-            state     <= IDLE;
-            v_idx     <= 0;
-            done      <= 1'b0;
-            write_en  <= 1'b0;
+            state       <= IDLE;
+            v_idx       <= 0;
+            done        <= 1'b0;
+            write_en    <= 1'b0;
+            x_shifted_q <= 16'b0;
+            y_shifted_q <= 16'b0;
         end else begin
             done     <= 1'b0;
             write_en <= 1'b0;
@@ -131,7 +145,7 @@ module perspective_divide (
                 state <= READ_X;
             end
 
-            // Present 4N+0 (vx address). Don't latch yet — vx data will be
+            // Present 4N+0 (vx address). Don't latch yet - vx data will be
             // valid two cycles from now.
             READ_X: begin
                 read_addr <= {v_idx, 2'b00};
@@ -178,9 +192,19 @@ module perspective_divide (
             COMP_NDC: begin
                 x_ndc_q <= x_ndc_w;
                 y_ndc_q <= y_ndc_w;
-                state   <= COMP_PIX;
+                state   <= COMP_SHIFT;
             end
 
+            // Stage 1 of pixel-coord computation: register the add results.
+            // Combinational path: x_ndc_q ? fp16_add ? x_shifted_q (one op).
+            COMP_SHIFT: begin
+                x_shifted_q <= x_shifted_w;
+                y_shifted_q <= y_shifted_w;
+                state       <= COMP_PIX;
+            end
+
+            // Stage 2: register the multiply results.
+            // Combinational path: x_shifted_q ? fp16_mul ? px_q (one op).
             COMP_PIX: begin
                 px_q  <= px_w;
                 py_q  <= py_w;

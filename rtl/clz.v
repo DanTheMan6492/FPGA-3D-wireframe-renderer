@@ -1,3 +1,23 @@
+// =============================================================================
+// clz.v  —  Count Leading Zeros (parameterized width)
+// =============================================================================
+// Combinational priority encoder. Given an input `value` of width WIDTH,
+// `count` is the number of leading zero bits before the first 1.
+//
+//   value = 0001_0000   -> count = 3
+//   value = 1000_0000   -> count = 0
+//   value = 0000_0001   -> count = 7
+//   value = 0000_0000   -> count = WIDTH (and `all_zero` is asserted)
+//
+// The output width is $clog2(WIDTH+1), just enough to represent the WIDTH
+// case (all-zero input). For WIDTH=12 the count fits in 4 bits.
+//
+// Implementation: scan from LSB upward; every time a 1 is seen, overwrite
+// `count` with the corresponding leading-zero value. The last 1 encountered
+// is the MSB, so its value wins — which is exactly the leading-zero count.
+// =============================================================================
+
+`timescale 1ns / 1ps
 module clz #(
     parameter WIDTH = 16
 )(

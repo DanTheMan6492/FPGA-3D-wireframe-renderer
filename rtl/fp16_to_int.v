@@ -27,6 +27,7 @@
 //   - Apply sign at the end.
 // =============================================================================
 
+`timescale 1ns / 1ps
 module fp16_to_int #(
     parameter WIDTH = 12
 )(

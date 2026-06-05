@@ -23,6 +23,7 @@
 // Framebuffer addressing: bit_index = y*640 + x; word = bit_index>>5; bit = idx&31
 // =============================================================================
 
+`timescale 1ns / 1ps
 module bresenham (
     input  wire        clk,
     input  wire        rst,

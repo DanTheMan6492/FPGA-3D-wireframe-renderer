@@ -1,19 +1,19 @@
 // =============================================================================
-// uart_rx.v  —  UART receiver (8N1), one byte at a time
+// uart_rx.v  -  UART receiver (8N1), one byte at a time
 // =============================================================================
 // Receives bytes from the host PC over the serial line, as described in
-// docs/top_level.md ("uart_rx — receives one byte at a time from the host PC").
+// docs/top_level.md ("uart_rx - receives one byte at a time from the host PC").
 // This module ONLY deserializes the wire into bytes; the packet interpreter
 // (vertex_count, face_count, vertex bytes, face-index bytes -> shadow_mem, then
 // new_data_flag) lives inline at the top level and consumes this byte stream.
 //
-// Frame format: 8N1 — one start bit (0), 8 data bits LSB-first, one stop bit
+// Frame format: 8N1 - one start bit (0), 8 data bits LSB-first, one stop bit
 // (1). The line idles high. Each fully received byte is presented on `data`
 // with `valid` pulsing high for exactly one clock.
 //
-// CLKS_PER_BIT = clk frequency / baud rate. For the Basys 3's 100 MHz clock at
-// 115200 baud that is 100_000_000 / 115_200 ~= 868. The testbench overrides it
-// to a small value so a bit lasts only a handful of clocks.
+// CLKS_PER_BIT = clk frequency / baud rate. For the 50 MHz system clock at
+// 9600 baud that is 50_000_000 / 9_600 ~= 5208. The testbench overrides both
+// parameters to small values so a bit lasts only a handful of clocks.
 //
 // Robustness:
 //   * A two-flop synchronizer brings the asynchronous rx line into the clk
@@ -23,8 +23,10 @@
 //   * Every data bit is sampled at its midpoint, where it is most stable.
 // =============================================================================
 
+`timescale 1ns / 1ps
 module uart_rx #(
-    parameter CLKS_PER_BIT = 868
+    parameter CLK_FREQ  = 50_000_000,
+    parameter BAUD_RATE = 9_600
 )(
     input  wire       clk,
     input  wire       rst,       // synchronous reset -> IDLE
@@ -33,6 +35,7 @@ module uart_rx #(
     output reg        valid      // one-clock strobe when `data` is fresh
 );
 
+    localparam CLKS_PER_BIT = CLK_FREQ / BAUD_RATE;
     localparam CW = $clog2(CLKS_PER_BIT);   // wide enough for 0 .. CLKS_PER_BIT-1
 
     localparam IDLE    = 3'd0;
@@ -105,9 +108,12 @@ module uart_rx #(
                     end
                 end
 
-                // Ride out the stop bit, then strobe valid.
+                // Sample the stop bit at its midpoint, strobe valid, then
+                // return to IDLE immediately so we are ready for the next
+                // start bit. Waiting the full bit period here caused the
+                // receiver to miss the start bit of back-to-back bytes.
                 STOP: begin
-                    if (clk_count < CLKS_PER_BIT-1) begin
+                    if (clk_count < (CLKS_PER_BIT-1)/2) begin
                         clk_count <= clk_count + 1'b1;
                     end else begin
                         valid     <= 1'b1;

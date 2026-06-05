@@ -10,7 +10,8 @@
 //     (vertex_count, face_count, then vertex coord bytes, then face indices) —
 //     mirroring the shadow_mem byte layout the top level expects.
 //
-// CLKS_PER_BIT is overridden small so each bit lasts only a few clocks.
+// CLK_FREQ and BAUD_RATE are overridden to tiny values so each bit lasts only
+// a few clocks in simulation.
 //
 // Run:
 //   iverilog -g2012 -o build/uart_rx_tb rtl/uart_rx.v tb/uart_rx_tb.v
@@ -21,7 +22,9 @@
 
 module uart_rx_tb;
 
-    localparam CLKS_PER_BIT = 16;        // small bit period for sim
+    localparam CLK_FREQ     = 16;        // } together give CLKS_PER_BIT = 16
+    localparam BAUD_RATE    = 1;         // }
+    localparam CLKS_PER_BIT = CLK_FREQ / BAUD_RATE;  // used for repeat() timing
 
     reg        clk;
     reg        rst;
@@ -29,7 +32,7 @@ module uart_rx_tb;
     wire [7:0] data;
     wire       valid;
 
-    uart_rx #(.CLKS_PER_BIT(CLKS_PER_BIT)) dut (
+    uart_rx #(.CLK_FREQ(CLK_FREQ), .BAUD_RATE(BAUD_RATE)) dut (
         .clk   (clk),
         .rst   (rst),
         .rx    (rx),

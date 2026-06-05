@@ -30,6 +30,7 @@
 //   an[d] low enables digit d; exactly one bit is low at any time (one-hot-low).
 // =============================================================================
 
+`timescale 1ns / 1ps
 module display_top #(
     // Width of the free-running refresh counter. The top two bits select the
     // active digit, so a full 4-digit sweep takes 2**REFRESH_BITS clocks.

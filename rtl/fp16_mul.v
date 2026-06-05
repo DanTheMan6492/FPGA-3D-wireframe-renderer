@@ -1,9 +1,38 @@
+// =============================================================================
+// fp16_mul.v  —  Combinational IEEE 754 half-precision multiplier
+// =============================================================================
+// Computes result = a * b for fp16 values, with denormalized numbers flushed
+// to zero (FTZ) on both input and output. NaN inputs are not supported by
+// contract; if they occur the output is undefined.
+//
+// fp16 layout:
+//   [15]    sign
+//   [14:10] exponent (biased by 15; 0 = zero after FTZ, 31 = infinity)
+//   [9:0]   mantissa (implicit leading 1 for normal numbers)
+//
+// Algorithm:
+//   sign     : a.sign XOR b.sign
+//   mantissa : (1.a_mantissa) * (1.b_mantissa) — 11 x 11 = 22 bits.
+//              The leading 1 of the product is either at position 21 (if both
+//              operands' implicit 1s overlapped exactly) or position 20.
+//   exponent : a.exp + b.exp - bias  (+1 if the product needed no shift,
+//              because the result's leading 1 came out at position 21 rather
+//              than 20).
+//   special  : either operand zero -> zero out
+//              overflow (exp_unbiased > 30) -> infinity (preserve sign)
+//              underflow (exp_unbiased < 1) -> flush to zero
+// =============================================================================
+
+`timescale 1ns / 1ps
 module fp16_mul (
     input  wire [15:0] a,
     input  wire [15:0] b,
     output wire [15:0] result
 );
 
+    // -------------------------------------------------------------------------
+    // Field extraction
+    // -------------------------------------------------------------------------
     wire        sign_a = a[15];
     wire        sign_b = b[15];
     wire [4:0]  exp_a  = a[14:10];
@@ -11,56 +40,84 @@ module fp16_mul (
     wire [9:0]  man_a  = a[9:0];
     wire [9:0]  man_b  = b[9:0];
 
+    // -------------------------------------------------------------------------
     // Zero detection (treat denormals as zero — FTZ)
+    // -------------------------------------------------------------------------
     wire a_is_zero = (exp_a == 5'd0);
     wire b_is_zero = (exp_b == 5'd0);
     wire any_zero  = a_is_zero | b_is_zero;
 
+    // -------------------------------------------------------------------------
     // Infinity detection (exp == 31, mantissa == 0)
+    // -------------------------------------------------------------------------
     wire a_is_inf  = (exp_a == 5'd31) && (man_a == 10'd0);
     wire b_is_inf  = (exp_b == 5'd31) && (man_b == 10'd0);
     wire any_inf   = a_is_inf | b_is_inf;
 
+    // -------------------------------------------------------------------------
     // Mantissa multiply: include implicit leading 1, multiply 11x11 = 22 bits
+    // -------------------------------------------------------------------------
     wire [10:0] full_a  = {1'b1, man_a};
     wire [10:0] full_b  = {1'b1, man_b};
     wire [21:0] product = full_a * full_b;
 
-
-    // The product's leading 1 sits at either bit 21 or bit 20.
+    // -------------------------------------------------------------------------
+    // Normalize. The product's leading 1 sits at either bit 21 or bit 20.
     //   - bit 21 set: result is in [2.0, 4.0). Shift right by 1, exp += 1.
     //   - bit 21 clear, bit 20 set: result is in [1.0, 2.0). No shift, exp += 0.
+    //
+    // For round-to-nearest-even we need:
+    //   - 10 mantissa bits (the kept value)
+    //   - 1 guard bit (G)  : the bit immediately below the kept mantissa
+    //   - 1 round bit (R)  : the bit below the guard
+    //   - sticky (S)       : OR of all bits below R
+    //
+    // With the leading 1 dropped, we keep product bits [19:10] or [20:11].
+    // G/R/S come from the remaining low bits of the 22-bit product.
+    // -------------------------------------------------------------------------
     wire        msb_at_21 = product[21];
-
 
     wire [9:0]  mantissa_raw = msb_at_21 ? product[20:11] : product[19:10];
     wire        guard        = msb_at_21 ? product[10]    : product[9];
     wire        round_bit    = msb_at_21 ? product[9]     : product[8];
-    wire        sticky       = msb_at_21 ? |product[8:0]  : |product[7:0]; // |logical or of all other bits
+    wire        sticky       = msb_at_21 ? |product[8:0]  : |product[7:0];
 
-    // Round-to-nearest-even decision
+    // Round-to-nearest-even decision:
+    //   round up if guard && (round_bit || sticky || mantissa_raw[0])
+    // The mantissa_raw[0] term implements the "round to even" tiebreaker:
+    // when guard is the only set bit below (R=S=0), round up only if the
+    // current LSB is 1 (so the result LSB becomes 0 — even).
     wire round_up = guard && (round_bit || sticky || mantissa_raw[0]);
 
     // Apply rounding. Use 11 bits to catch mantissa overflow (e.g. 0x3FF -> 0x400).
     wire [10:0] mantissa_rounded = {1'b0, mantissa_raw} + {10'b0, round_up};
 
     // Post-rounding overflow: if mantissa_rounded[10] is set, the mantissa
-    // overflowed (was 0x3FF, became 0x400). Shift right by 1 and bump exp.
+    // overflowed from 0x3FF to 0x400. Conceptually this means the value
+    // became 10.000... in binary, which renormalizes to 1.000... × 2 with
+    // a stored mantissa of all zeros. So when round_overflow happens, the
+    // stored mantissa is exactly 0; the exponent gets +1 (see exp_sum below).
+    // When there's no overflow, the stored mantissa is the lower 10 bits.
+    // In both cases, the lower 10 bits of mantissa_rounded are the right
+    // answer.
     wire        round_overflow = mantissa_rounded[10];
-    wire [9:0]  mantissa_out   = round_overflow ? mantissa_rounded[10:1]
-                                                : mantissa_rounded[9:0];
+    wire [9:0]  mantissa_out   = mantissa_rounded[9:0];
 
+    // -------------------------------------------------------------------------
     // Exponent: a + b - bias, plus 1 if the product's leading 1 was at bit 21,
     // plus another 1 if rounding caused the mantissa to overflow.
     //
     // bias = 15. Worst case: 30 + 30 - 15 + 1 + 1 = 47. Fits in 8 bits signed
     // with margin for the negative underflow values too.
+    // -------------------------------------------------------------------------
     wire signed [7:0] exp_sum = $signed({3'b0, exp_a}) + $signed({3'b0, exp_b})
                               - 8'sd15
                               + (msb_at_21     ? 8'sd1 : 8'sd0)
                               + (round_overflow ? 8'sd1 : 8'sd0);
 
+    // -------------------------------------------------------------------------
     // Special-case classification
+    // -------------------------------------------------------------------------
     wire overflow  = (exp_sum > 8'sd30);
     wire underflow = (exp_sum < 8'sd1);
 

@@ -17,6 +17,7 @@
 // =============================================================================
 
 
+`timescale 1ns / 1ps
 module wireframe_gen (
     input  wire        clk,
     input  wire        rst,

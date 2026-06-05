@@ -1,9 +1,39 @@
+#!/usr/bin/env python3
+"""
+gen_recip_lut.py — Generate the fp16 reciprocal mantissa LUT.
+
+For each 10-bit input mantissa m (representing 1.m in [1.0, 2.0)), compute
+1.0 / (1.m) in fp16, then extract the OUTPUT mantissa for the hardware LUT.
+
+Because 1 / (1.m) is in (0.5, 1.0] except at m=0 (where it's exactly 1.0),
+the reciprocal's actual normalized fp16 value has:
+  - exponent that we compute separately in hardware (depends on m == 0)
+  - a 10-bit mantissa we just look up here
+
+What we store per entry:
+  - For m == 0:    1.0 / 1.0 = 1.0, fp16 mantissa bits = 0
+  - For m != 0:    let r = 1.0 / (1.m); r is in (0.5, 1.0).
+                   Normalize r into [1.0, 2.0) by doubling (left-shift mantissa
+                   by 1, exponent -= 1). The hardware does the -1 to the
+                   exponent unconditionally for m != 0 entries.
+                   We store the post-normalize 10-bit mantissa.
+
+Output: one hex value per line (10 bits => 3 hex chars, but $readmemh accepts
+arbitrary widths and zero-pads from the left), 1024 lines total.
+
+Usage:
+  python3 gen_recip_lut.py                  # writes ../data/recip_lut.mem
+  python3 gen_recip_lut.py path/to/out.hex  # writes to the given path
+"""
+
 import os
 import sys
 import numpy as np
 
+# Default output path: data/recip_lut.mem at the project root.
+# The script lives in scripts/, so the project root is one level up.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_OUT = os.path.normpath(os.path.join(_HERE, "..", "data", "recip_lut.hex"))
+DEFAULT_OUT = os.path.normpath(os.path.join(_HERE, "data", "recip_lut.mem"))
 
 def build_lut():
     entries = []

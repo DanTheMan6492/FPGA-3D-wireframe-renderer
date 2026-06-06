@@ -1,21 +1,6 @@
 // =============================================================================
 // wireframe_gen.v  —  Per-face wireframe rasterizer
 // =============================================================================
-// For each of `face_count` faces:
-//   1. Read three vertex indices a, b, c from obj_mem at addresses
-//      face_base + 3i, +1, +2  where face_base = vertex_count * 3.
-//   2. For each of a, b, c: read px, py from transform_mem (2v, 2v+1).
-//   3. Convert fp16 pixel coords to clamped integer pixel coords.
-//   4. Invoke the bresenham submodule three times (edges AB, BC, CA),
-//      waiting for its `done` between edges.
-//   5. Advance to the next face. After the last face, assert done.
-//
-// Memory access pattern uses the same "address two states before latch"
-// pattern as perspective_divide, accommodating the 1-cycle SDPRAM read
-// latency in a way that resolves cleanly when both port driver and
-// consumer are registered.
-// =============================================================================
-
 
 `timescale 1ns / 1ps
 module wireframe_gen (

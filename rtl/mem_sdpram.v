@@ -1,15 +1,6 @@
 // =============================================================================
 // mem_sdpram.v  —  Simple Dual-Port RAM (plain register inference)
 // =============================================================================
-// Port A: write only. Port B: read only (1-cycle latency).
-//
-// CLOCKING_MODE:
-//   0 = common clock  (both ports use `clk`)
-//   1 = independent clock (port A uses `clk`, port B uses `clkb`)
-//
-// MEMORY_INIT_FILE: path to .hex file for BRAM initialisation. Set to ""
-//   to skip. Vivado loads this at bitstream time; simulation uses $readmemh.
-// =============================================================================
 
 `timescale 1ns / 1ps
 

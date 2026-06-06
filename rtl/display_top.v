@@ -1,34 +1,6 @@
 // =============================================================================
 // display_top.v  —  Basys 3 four-digit seven-segment display driver
 // =============================================================================
-// Drives the Basys 3 (Artix-7) on-board 4-digit common-anode seven-segment
-// display, showing the current vertex and face counts of the uploaded mesh.
-// This is the module referenced as "display_top — 7-segment display showing
-// vertex/face counts" in docs/top_level.md, fed by the top level's
-// vertex/face count display path.
-//
-// Both counts are 8-bit (0..255), so each is shown as two HEXADECIMAL digits.
-// Hex is the only layout that fits both full-range counts on the board's four
-// digits at once (decimal 255 would need three digits per value = six total):
-//
-//        +-----+-----+   +-----+-----+
-//        | AN3 | AN2 |   | AN1 | AN0 |
-//        +-----+-----+   +-----+-----+
-//          vertex_count     face_count
-//           (hex 00..FF)     (hex 00..FF)
-//
-// The four digits share one set of cathode (segment) lines, so they are
-// time-multiplexed: a free-running counter selects one digit at a time, drives
-// that digit's anode low, and presents that digit's segment pattern. At the
-// default REFRESH_BITS the whole display is swept far faster than the eye can
-// follow, so all four digits appear lit simultaneously with no flicker.
-//
-// Pin polarity (common anode): both `seg` and `an` are ACTIVE LOW.
-//   seg[0]=CA(a), seg[1]=CB(b), ... seg[6]=CG(g)  — matches the Basys 3 master
-//   XDC ordering, so a 0 bit lights that segment.
-//   `dp` is the decimal point (active low); held off (1) here.
-//   an[d] low enables digit d; exactly one bit is low at any time (one-hot-low).
-// =============================================================================
 
 `timescale 1ns / 1ps
 module display_top #(

@@ -1,27 +1,6 @@
 // =============================================================================
 // fp16_mul.v  —  Combinational IEEE 754 half-precision multiplier
 // =============================================================================
-// Computes result = a * b for fp16 values, with denormalized numbers flushed
-// to zero (FTZ) on both input and output. NaN inputs are not supported by
-// contract; if they occur the output is undefined.
-//
-// fp16 layout:
-//   [15]    sign
-//   [14:10] exponent (biased by 15; 0 = zero after FTZ, 31 = infinity)
-//   [9:0]   mantissa (implicit leading 1 for normal numbers)
-//
-// Algorithm:
-//   sign     : a.sign XOR b.sign
-//   mantissa : (1.a_mantissa) * (1.b_mantissa) — 11 x 11 = 22 bits.
-//              The leading 1 of the product is either at position 21 (if both
-//              operands' implicit 1s overlapped exactly) or position 20.
-//   exponent : a.exp + b.exp - bias  (+1 if the product needed no shift,
-//              because the result's leading 1 came out at position 21 rather
-//              than 20).
-//   special  : either operand zero -> zero out
-//              overflow (exp_unbiased > 30) -> infinity (preserve sign)
-//              underflow (exp_unbiased < 1) -> flush to zero
-// =============================================================================
 
 `timescale 1ns / 1ps
 module fp16_mul (

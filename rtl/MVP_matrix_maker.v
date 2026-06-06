@@ -1,23 +1,6 @@
 // =============================================================================
 // MVP_matrix_maker.v  -  Per-frame MVP matrix builder
 // =============================================================================
-// On each `start` pulse:
-//   1. Latch the current rotation speeds, advance the internal angle
-//      registers by them (wrap-around is automatic in 8 bits).
-//   2. Build rotation matrices Rx and Ry from the sin/cos LUT.
-//   3. Drive mat_mul to compute M = Ry * Rx.
-//   4. Capture the 16 result elements into an internal "M" register array.
-//   5. Drive mat_mul a second time to compute MVP = PV * M, where PV is a
-//      hardcoded constant matrix from the camera setup.
-//   6. As MVP elements stream out, write them to Transform RAM via the
-//      ram_* interface.
-//   7. Assert `done`.
-//
-// MVP_matrix_maker does NOT instantiate mat_mul itself - it drives the
-// mat_mul interface, which the top level muxes between MVP_matrix_maker and
-// the vertex-batch streaming logic.
-// =============================================================================
-
 
 `timescale 1ns / 1ps
 module MVP_matrix_maker (

@@ -1,14 +1,6 @@
 // =============================================================================
 // framebuffer_clear.v  —  Walks the framebuffer, writing zero to every word
 // =============================================================================
-// On `start`, asserts busy and writes 32'b0 to each of the 9,600 framebuffer
-// words (640 * 480 / 32). One word per cycle, so the clear completes in
-// 9,600 cycles — well under the 144,000-cycle vblank window.
-//
-// The top level muxes this module's fb_* outputs with wireframe_gen's onto
-// the back-buffer's write port. RENDER is gated on !busy, so the two never
-// write concurrently.
-// =============================================================================
 
 `timescale 1ns / 1ps
 module framebuffer_clear (

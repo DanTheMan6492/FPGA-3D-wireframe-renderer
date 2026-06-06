@@ -1,27 +1,6 @@
 // =============================================================================
 // uart_rx.v  -  UART receiver (8N1), one byte at a time
 // =============================================================================
-// Receives bytes from the host PC over the serial line, as described in
-// docs/top_level.md ("uart_rx - receives one byte at a time from the host PC").
-// This module ONLY deserializes the wire into bytes; the packet interpreter
-// (vertex_count, face_count, vertex bytes, face-index bytes -> shadow_mem, then
-// new_data_flag) lives inline at the top level and consumes this byte stream.
-//
-// Frame format: 8N1 - one start bit (0), 8 data bits LSB-first, one stop bit
-// (1). The line idles high. Each fully received byte is presented on `data`
-// with `valid` pulsing high for exactly one clock.
-//
-// CLKS_PER_BIT = clk frequency / baud rate. For the 50 MHz system clock at
-// 9600 baud that is 50_000_000 / 9_600 ~= 5208. The testbench overrides both
-// parameters to small values so a bit lasts only a handful of clocks.
-//
-// Robustness:
-//   * A two-flop synchronizer brings the asynchronous rx line into the clk
-//     domain (metastability guard).
-//   * The start bit is re-checked at its midpoint; if the line has returned
-//     high by then the edge was a glitch and the receiver returns to idle.
-//   * Every data bit is sampled at its midpoint, where it is most stable.
-// =============================================================================
 
 `timescale 1ns / 1ps
 module uart_rx #(

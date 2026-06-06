@@ -1,20 +1,6 @@
 // =============================================================================
 // int_to_fp16.v  —  Combinational signed-8-bit integer to fp16 converter
 // =============================================================================
-// Converts an 8-bit signed integer (range -128 to 127) to its fp16
-// representation. All 8-bit signed integers are exactly representable in
-// fp16 (the 10-bit mantissa easily covers 8-bit precision), so no rounding
-// is needed.
-//
-// Algorithm:
-//   - Special-case zero -> +0
-//   - Take absolute value into a 9-bit intermediate (so -128 -> 128 without
-//     overflow; +int8 stays unchanged, -int8 negates)
-//   - Find the MSB position via clz (which leading zero count gives us)
-//   - Exponent = bias (15) + (MSB position relative to bit 0)
-//   - Mantissa = bits below the MSB, left-justified into the 10-bit field
-// =============================================================================
-
 
 `timescale 1ns / 1ps
 module int_to_fp16 (

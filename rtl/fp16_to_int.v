@@ -1,31 +1,6 @@
 // =============================================================================
 // fp16_to_int.v  —  Combinational fp16 to signed integer converter
 // =============================================================================
-// Converts an fp16 value to a WIDTH-bit signed integer using truncation
-// toward zero. This is the conversion used to derive integer pixel
-// coordinates from fp16 viewport-transformed positions.
-//
-// WIDTH parameter sets the output width. Default 12, which covers the range
-// needed for intermediate pixel-space values (well over 640/480) before
-// downstream clamping.
-//
-// Behavior:
-//   - Zero or denormal (FTZ)       -> 0
-//   - Infinity                     -> saturate to ±(2^(WIDTH-1) - 1)
-//   - Magnitude >= 2^(WIDTH-1)     -> saturate
-//   - Normal in-range value        -> truncate toward zero
-//
-// Algorithm:
-//   - Reconstruct the integer significand 1.m as an (1 + 10) = 11-bit value
-//   - Determine the unbiased exponent e_true = exp - 15
-//   - If e_true >= 0: left-shift the significand by e_true (the integer part
-//                     of the value is significand << (e_true - 10) — but the
-//                     mantissa already has 10 fractional bits, so:
-//                     if e_true >= 10: int = sig << (e_true - 10)
-//                     if e_true <  10: int = sig >> (10 - e_true)  (truncates)
-//   - If e_true <  0: |value| < 1.0, so the integer part is 0.
-//   - Apply sign at the end.
-// =============================================================================
 
 `timescale 1ns / 1ps
 module fp16_to_int #(

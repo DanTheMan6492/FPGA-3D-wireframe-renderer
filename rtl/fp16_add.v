@@ -1,28 +1,6 @@
 // =============================================================================
 // fp16_add.v  -  Combinational IEEE 754 half-precision adder
 // =============================================================================
-// Computes result = a + b for fp16 values, with denormalized numbers flushed
-// to zero (FTZ) on input and output. NaN inputs are not supported.
-//
-// Algorithm:
-//   1. Decode and FTZ. Determine larger-magnitude operand (by exp, breaking
-//      ties by mantissa); call it "big", the other "small". The result sign
-//      will be the big operand's sign (for both add and effective-subtract).
-//   2. Align: shift small's mantissa right by (big_exp - small_exp). Keep G,
-//      R, and a sticky S of the bits shifted past R.
-//   3. Sign analysis: if signs match it's an effective ADD of magnitudes; if
-//      signs differ it's an effective SUBTRACT (big - small, magnitudes).
-//   4. Compute the sum/difference in a width that accommodates either
-//      direction's overflow / cancellation:
-//          add  : 11-bit + 11-bit -> 12 bits (overflow at the top)
-//          sub  : 11-bit - 11-bit -> 11 bits, possibly with many leading 0s
-//      We use a 14-bit datapath: { carry/leading, 11 mantissa, G, R } and a
-//      separate sticky bit.
-//   5. Normalize: shift left until the leading 1 sits in the canonical
-//      position; adjust exponent accordingly. clz drives this.
-//   6. Round-to-nearest-even using G, R, S. Handle post-rounding overflow.
-//   7. Final special-case mux for over/underflow, infinity, exact-zero.
-// =============================================================================
 
 
 `timescale 1ns / 1ps

@@ -1,25 +1,6 @@
 // =============================================================================
 // perspective_divide.v  -  Per-vertex perspective divide + viewport transform
 // =============================================================================
-// For each of `vertex_count` vertices in transform_mem:
-//   1. Read 4 fp16 components (x, y, z, w) from addresses 4N..4N+3.
-//      (z is read but unused for 2D wireframe; reserved for flat-shading.)
-//   2. Compute w_recip = 1/w (registered).
-//   3. Compute x_ndc = x * w_recip, y_ndc = y * w_recip (registered).
-//   4. Compute pixel coords (registered):
-//        px = (x_ndc + 1.0) * 320.0
-//        py = (1.0 - y_ndc) * 240.0
-//      Y is flipped because NDC y points up, screen y points down.
-//   5. Write px and py to transform_mem at addresses 2N and 2N+1.
-//
-// transform_mem is true dual-port: read on port A (this module's read_addr/
-// read_data), write on port B (write_addr/write_data/write_en). The write
-// pointer (2N) always trails the read pointer (4N..4N+3), so there is no
-// read/write hazard within or across vertices.
-//
-// transform_mem has 1-cycle read latency: address presented on cycle K,
-// data valid on cycle K+1. The FSM handles this explicitly.
-// =============================================================================
 
 `timescale 1ns / 1ps
 module perspective_divide (
@@ -90,21 +71,6 @@ module perspective_divide (
     fp16_mul u_mul_px (.a(x_shifted_q), .b(FP16_320), .result(px_w));
     fp16_mul u_mul_py (.a(y_shifted_q), .b(FP16_240), .result(py_w));
 
-    // -------------------------------------------------------------------------
-    // FSM
-    //
-    //   IDLE       - wait for start.
-    //   READ_X     - present addr 4N+0. read_data will reflect this 2 cycles later.
-    //   READ_Y     - present addr 4N+1. (read_data is still the previous value.)
-    //   READ_Z     - present addr 4N+2. read_data now = tm[4N+0]: latch as vx.
-    //   READ_W     - present addr 4N+3. read_data = tm[4N+1]: latch as vy.
-    //   WAIT_Z     - read_data = tm[4N+2]: latch as vz.
-    //   WAIT_W     - read_data = tm[4N+3]: latch as vw.
-    //
-    // i.e. each latch is TWO states after the matching address was presented.
-    // This matches the testbench/SDPRAM model where read_addr drives a
-    // registered output, giving an effective two-cycle read-to-use latency
-    // when both the address and the consumer are registered.
     localparam IDLE       = 4'd0;
     localparam READ_X     = 4'd1;
     localparam READ_Y     = 4'd2;
@@ -241,7 +207,3 @@ module perspective_divide (
     end
 
 endmodule
-
-// WAIT_Z is declared but never reached because the READ states pipeline the
-// latches one ahead. Left in the localparam list as a sanity reference for
-// the read-latency pattern.
